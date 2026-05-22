@@ -14,7 +14,7 @@ source .venv/bin/activate
 | File | Scope |
 |---|---|
 | `kernels/gemv.py` | batch=1 GEMV — integrated into vLLM |
-| `kernels/triton.py` | skinny GEMM batch=1–32 — Artemis target |
+| `kernels/skinny_gemm.py` | skinny GEMM batch=1–32 — Artemis target |
 
 ## Run correctness check
 
@@ -23,7 +23,7 @@ source .venv/bin/activate
 .venv/bin/python kernel_opt/kernels/gemv.py
 
 # Skinny GEMM (batch=1-32)
-.venv/bin/python kernel_opt/kernels/triton.py
+.venv/bin/python kernel_opt/kernels/skinny_gemm.py
 ```
 
 ## Run benchmarks
@@ -41,7 +41,7 @@ Results written to `artemis_results.json` at the vLLM root.
 ## Promote a finished kernel to vLLM
 
 ```bash
-cp kernel_opt/kernels/triton.py vllm/kernels/triton/triton.py
+cp kernel_opt/kernels/skinny_gemm.py vllm/kernels/triton/skinny_gemm.py
 # then update vllm/model_executor/layers/utils.py dispatch
 ```
 
@@ -50,5 +50,5 @@ cp kernel_opt/kernels/triton.py vllm/kernels/triton/triton.py
 | Step | Command |
 |---|---|
 | Build | `VLLM_USE_PRECOMPILED=1 uv pip install --python /home/vishal/Desktop/vllm/.venv/bin/python -e /home/vishal/Desktop/vllm --torch-backend=auto` |
-| Test | `/home/vishal/Desktop/vllm/.venv/bin/python kernel_opt/kernels/triton.py` |
+| Test | `/home/vishal/Desktop/vllm/.venv/bin/python kernel_opt/kernels/skinny_gemm.py` |
 | Benchmark | `ORIG=$(pwd) && /home/vishal/Desktop/vllm/.venv/bin/python kernel_opt/benchmarks/bench_skinny_gemm.py "$ORIG"` |

@@ -18,7 +18,7 @@ import sys
 import torch
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-from kernels.triton import triton_skinny_gemm
+from kernels.skinny_gemm import triton_skinny_gemm
 
 DEVICE  = f"cuda:{os.environ.get('CUDA_DEVICE', '1')}"
 torch.cuda.set_device(DEVICE)
