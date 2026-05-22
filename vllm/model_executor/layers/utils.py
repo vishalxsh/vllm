@@ -89,13 +89,39 @@ def apply_penalties(
     return logits
 
 
+def _cuda_gemm_dispatch_impl(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    if x.shape[0] == 1 and bias is None:
+        from vllm.kernels.triton.gemv import triton_gemv
+        return triton_gemv(weight, x.squeeze(0)).unsqueeze(0)
+    return torch.nn.functional.linear(x, weight, bias)
+
+
+def _cuda_gemm_dispatch_fake(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    return x.new_empty((*x.shape[:-1], weight.shape[0]))
+
+
+direct_register_custom_op(
+    op_name="cuda_gemm_dispatch",
+    op_func=_cuda_gemm_dispatch_impl,
+    fake_impl=_cuda_gemm_dispatch_fake,
+)
+
+
 def default_unquantized_gemm(
     layer: torch.nn.Module,
     x: torch.Tensor,
     weight: torch.Tensor,
     bias: torch.Tensor | None = None,
 ):
-    return torch.nn.functional.linear(x, weight, bias)
+    return torch.ops.vllm.cuda_gemm_dispatch(x, weight, bias)
 
 
 def use_aiter_triton_gemm(n, m, k, dtype):
