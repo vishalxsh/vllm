@@ -20,13 +20,13 @@ import torch
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 from kernels.skinny_gemm import triton_skinny_gemm
 
-DEVICE  = f"cuda:{os.environ.get('CUDA_DEVICE', '1')}"
+DEVICE  = f"cuda:{os.environ.get('CUDA_DEVICE', '0')}"
 torch.cuda.set_device(DEVICE)
 
 SHAPES = [
-    (3584,  3584,  "attn_proj"),
-    (18944, 3584,  "ffn_gate "),
-    (3584,  18944, "ffn_down "),
+    (3584,  3584,  "attn_proj   "),
+    (37888, 3584,  "gate_up_proj"),
+    (3584,  18944, "ffn_down    "),
 ]
 BATCH_SIZES = [1, 4, 8, 16, 32]
 DTYPE       = torch.bfloat16
@@ -116,5 +116,5 @@ out_path = (
     if len(sys.argv) > 1
     else pathlib.Path("artemis_results.json")
 )
-out_path.write_text(json.dumps(flat, indent=2) + "\n")
+out_path.write_text(json.dumps([flat], indent=2) + "\n")
 print(f"Wrote metrics to: {out_path.resolve()}")

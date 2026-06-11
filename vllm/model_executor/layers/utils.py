@@ -94,9 +94,12 @@ def _cuda_gemm_dispatch_impl(
     weight: torch.Tensor,
     bias: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    if x.shape[0] == 1 and bias is None:
-        from vllm.kernels.triton.gemv import triton_gemv
-        return triton_gemv(weight, x.squeeze(0)).unsqueeze(0)
+    if bias is None:
+        M, K = weight.shape
+        B = x.shape[0]
+        if B <= 32 and ((M == 37888 and K == 3584) or (M == 3584 and K == 18944) or (M == 3584 and K == 3584)):
+            from vllm.kernels.triton.skinny_gemm import triton_skinny_gemm
+            return triton_skinny_gemm(weight, x)
     return torch.nn.functional.linear(x, weight, bias)
 
 
