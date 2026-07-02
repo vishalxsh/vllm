@@ -111,8 +111,18 @@ class Qwen2MLP(nn.Module):
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
-        gate_up, _ = self.gate_up_proj(x)
-        x = self.act_fn(gate_up)
+        B = x.shape[0]
+        weight = self.gate_up_proj.weight
+        if (B <= 32
+                and x.dtype == torch.bfloat16
+                and x.is_cuda
+                and isinstance(weight, torch.Tensor)
+                and weight.dtype == torch.bfloat16):
+            from vllm.kernels.triton.fused_gate_up_silu import triton_fused_gate_up_silu
+            x = triton_fused_gate_up_silu(weight, x)
+        else:
+            gate_up, _ = self.gate_up_proj(x)
+            x = self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
 

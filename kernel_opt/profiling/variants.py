@@ -65,24 +65,33 @@ class StockCuBLASVariant(KernelVariant):
     def active(self) -> Iterator[None]:
         import vllm.kernels.triton.gemv as gemv_mod
         import vllm.kernels.triton.skinny_gemm as skinny_mod
+        from vllm.model_executor.models.qwen2 import Qwen2MLP
 
-        original_gemv = gemv_mod.triton_gemv
+        original_gemv   = gemv_mod.triton_gemv
         original_skinny = skinny_mod.triton_skinny_gemm
+        original_forward = Qwen2MLP.forward
 
         def _cublas_gemv(weight: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
             return torch.mv(weight, x)
 
         def _cublas_gemm(W: torch.Tensor, X: torch.Tensor) -> torch.Tensor:
-            # W [M, K], X [B, K] → [B, M]
             return torch.nn.functional.linear(X, W)
 
-        gemv_mod.triton_gemv = _cublas_gemv
+        def _unfused_forward(self_mlp, x):
+            gate_up, _ = self_mlp.gate_up_proj(x)
+            x = self_mlp.act_fn(gate_up)
+            x, _ = self_mlp.down_proj(x)
+            return x
+
+        gemv_mod.triton_gemv         = _cublas_gemv
         skinny_mod.triton_skinny_gemm = _cublas_gemm
+        Qwen2MLP.forward             = _unfused_forward
         try:
             yield
         finally:
-            gemv_mod.triton_gemv = original_gemv
+            gemv_mod.triton_gemv         = original_gemv
             skinny_mod.triton_skinny_gemm = original_skinny
+            Qwen2MLP.forward             = original_forward
 
 
 class TritonGemvVariant(KernelVariant):
@@ -98,14 +107,43 @@ class TritonGemvVariant(KernelVariant):
 
 
 class TritonSkinnyGemmVariant(KernelVariant):
-    """Candidate: Triton tl.dot skinny GEMM (skinny_gemm.py) for B=1–32.
+    """Triton skinny GEMM only — fused gate+SiLU disabled.
 
-    No patching needed — _cuda_gemm_dispatch_impl already routes B≤32 for
-    all three Qwen2.5-7B shapes to triton_skinny_gemm for all batch sizes.
+    Patches Qwen2MLP.forward() back to the unfused two-step path so we can
+    isolate the incremental effect of the fused kernel.
     """
 
     name = "triton_skinny_gemm"
-    description = "Candidate — Triton skinny GEMM (skinny_gemm.py) at B=1–32"
+    description = "Triton skinny GEMM at B=1–32, unfused SiLU (baseline for fusion)"
+
+    @contextmanager
+    def active(self) -> Iterator[None]:
+        from vllm.model_executor.models.qwen2 import Qwen2MLP
+
+        original_forward = Qwen2MLP.forward
+
+        def _unfused_forward(self_mlp, x):
+            gate_up, _ = self_mlp.gate_up_proj(x)
+            x = self_mlp.act_fn(gate_up)
+            x, _ = self_mlp.down_proj(x)
+            return x
+
+        Qwen2MLP.forward = _unfused_forward
+        try:
+            yield
+        finally:
+            Qwen2MLP.forward = original_forward
+
+
+class FusedGateUpSiluVariant(KernelVariant):
+    """Triton skinny GEMM + fused gate_up_proj/SiluAndMul in one kernel pass.
+
+    No patching needed — Qwen2MLP.forward() already calls
+    triton_fused_gate_up_silu for B<=32 bfloat16 unquantized weights.
+    """
+
+    name = "fused_gate_up_silu"
+    description = "Triton skinny GEMM + fused gate+SiLU kernel at B=1–32"
 
     # active() inherits the no-op from KernelVariant
 
@@ -120,5 +158,6 @@ REGISTRY: dict[str, KernelVariant] = {
         StockCuBLASVariant(),
         TritonGemvVariant(),
         TritonSkinnyGemmVariant(),
+        FusedGateUpSiluVariant(),
     ]
 }

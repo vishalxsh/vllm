@@ -66,7 +66,6 @@ print(f"\nLoading {MODEL} ...")
 llm = LLM(
     model=MODEL,
     dtype="bfloat16",
-    enforce_eager=True,
     gpu_memory_utilization=GPU_MEM_UTIL,
     max_num_seqs=MAX_NUM_SEQS,
     trust_remote_code=True,

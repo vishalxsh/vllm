@@ -105,7 +105,6 @@ class ProfileRunner:
         self._llm = LLM(
             model=self.config.model_id,
             dtype=self.config.dtype,
-            enforce_eager=True,
             gpu_memory_utilization=util,
             tensor_parallel_size=self.config.tensor_parallel_size,
             trust_remote_code=self.config.trust_remote_code,

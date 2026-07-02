@@ -60,20 +60,27 @@ def _skinny_gemm_kernel(
 
 
 # ---------------------------------------------------------------------------
-# Fixed configs (no autotune). v3: write Y directly as [B,M] — no post-copy.
+# Hardcoded configs from offline tuning (Artemis + Triton autotune discovery).
+# @triton.autotune adds Python dispatch overhead (~1-2 us) that regresses
+# fast kernels like attn_proj at small B where kernel time is only 3-5 us.
+# Configs are keyed by (M, K, B_bucket) where B_bucket = 16 if B<=16 else 32.
 # ---------------------------------------------------------------------------
 
 def _bucket_b(B: int) -> int:
     return 16 if B <= 16 else 32
 
 
+# (M, K, B_bucket) -> (BLOCK_M, BLOCK_K, BLOCK_B, num_warps, num_stages)
+# attn_proj:  Artemis-tuned  BLOCK_K=64,  ns=4 wins (56 K-loops, deep pipeline)
+# ffn_gate:   autotune confirmed BLOCK_K=128, BLOCK_M=128 for large-B
+# ffn_down:   autotune confirmed BLOCK_K=128 beats BLOCK_K=64
 _CONFIGS = {
     (3584,  3584,  16): (32, 64,  16, 4, 4),
     (3584,  3584,  32): (32, 64,  32, 4, 4),
-    (18944, 3584,  16): (64, 64,  16, 4, 3),
-    (18944, 3584,  32): (64, 64,  32, 4, 3),
-    (3584,  18944, 16): (64, 128, 16, 4, 3),
-    (3584,  18944, 32): (64, 128, 32, 4, 3),
+    (18944, 3584,  16): (64,  128, 16, 4, 3),
+    (18944, 3584,  32): (128, 128, 32, 8, 3),
+    (3584,  18944, 16): (32,  128, 16, 4, 3),
+    (3584,  18944, 32): (64,  128, 32, 4, 3),
 }
 _DEFAULT_CONFIG = (32, 64, 16, 4, 3)
 
