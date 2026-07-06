@@ -60,10 +60,20 @@ def _skinny_gemm_kernel(
 
 
 # ---------------------------------------------------------------------------
-# Hardcoded configs from offline tuning (Artemis + Triton autotune discovery).
-# @triton.autotune adds Python dispatch overhead (~1-2 us) that regresses
-# fast kernels like attn_proj at small B where kernel time is only 3-5 us.
-# Configs are keyed by (M, K, B_bucket) where B_bucket = 16 if B<=16 else 32.
+# Shape-keyed configs + runtime tuning.
+#
+# _CONFIGS is a cache keyed by (M, K, B_bucket), pre-seeded from offline
+# tuning (Artemis + Triton autotune) for Qwen2.5-7B. ensure_tuned() tunes
+# unseen shapes at WEIGHT-LOAD time and races the winner against cuBLAS —
+# a shape is only registered in _ENABLED (and thus dispatched to Triton)
+# if Triton wins at BOTH batch buckets, so no model can get slower.
+#
+# @triton.autotune is deliberately not used: it adds Python dispatch
+# overhead (~1-2 us) that regresses fast kernels like attn_proj at small B
+# where kernel time is only 3-5 us, it re-tunes mid-serving on new keys
+# (latency spikes), and its timing syncs crash CUDA graph capture. Under
+# vLLM's fullgraph torch.compile the config is frozen at trace time anyway
+# — tuning later than weight loading is a hard error or a silent no-op.
 # ---------------------------------------------------------------------------
 
 def _bucket_b(B: int) -> int:
@@ -71,18 +81,41 @@ def _bucket_b(B: int) -> int:
 
 
 # (M, K, B_bucket) -> (BLOCK_M, BLOCK_K, BLOCK_B, num_warps, num_stages)
-# attn_proj:  Artemis-tuned  BLOCK_K=64,  ns=4 wins (56 K-loops, deep pipeline)
-# ffn_gate:   autotune confirmed BLOCK_K=128, BLOCK_M=128 for large-B
-# ffn_down:   autotune confirmed BLOCK_K=128 beats BLOCK_K=64
+# attn_proj:    Artemis-tuned  BLOCK_K=64,  ns=4 wins (56 K-loops, deep pipeline)
+# gate_up_proj: autotune confirmed BLOCK_K=128, BLOCK_M=128 for large-B
+# ffn_down:     autotune confirmed BLOCK_K=128 beats BLOCK_K=64
 _CONFIGS = {
     (3584,  3584,  16): (32, 64,  16, 4, 4),
     (3584,  3584,  32): (32, 64,  32, 4, 4),
-    (18944, 3584,  16): (64,  128, 16, 4, 3),
-    (18944, 3584,  32): (128, 128, 32, 8, 3),
+    (37888, 3584,  16): (64,  128, 16, 4, 3),
+    (37888, 3584,  32): (128, 128, 32, 8, 3),
     (3584,  18944, 16): (32,  128, 16, 4, 3),
     (3584,  18944, 32): (64,  128, 32, 4, 3),
 }
 _DEFAULT_CONFIG = (32, 64, 16, 4, 3)
+
+# Shapes the dispatch may route to Triton. Pre-seeded with the Qwen2.5-7B
+# shapes (validated vs cuBLAS offline: 1.04-1.22x per shape).
+_ENABLED: set = {
+    (3584, 3584),
+    (37888, 3584),
+    (3584, 18944),
+}
+
+# Pruned candidate space for runtime tuning, spanning the offline winners:
+# (BLOCK_M, BLOCK_K, num_warps, num_stages).
+_TUNE_SPACE = [
+    (32, 64, 4, 4), (32, 64, 4, 3), (32, 128, 4, 3), (32, 128, 4, 4),
+    (64, 64, 4, 3), (64, 128, 4, 3), (64, 128, 4, 2), (64, 128, 8, 3),
+    (128, 128, 8, 3), (128, 128, 4, 2), (128, 64, 4, 3), (128, 128, 8, 2),
+]
+
+# Triton must beat cuBLAS by this factor at both buckets to be enabled.
+_ENABLE_MARGIN = 1.02
+
+
+def is_enabled(M: int, K: int) -> bool:
+    return (M, K) in _ENABLED
 
 
 def _pick_config(M: int, K: int, B: int):
@@ -92,6 +125,80 @@ def _pick_config(M: int, K: int, B: int):
         return cfg
     bm, bk, _, nw, ns = _DEFAULT_CONFIG
     return (bm, bk, bb, nw, ns)
+
+
+def _launch(W, X, Y, M, K, B, cfg):
+    BLOCK_M, BLOCK_K, BLOCK_B, num_warps, num_stages = cfg
+    grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(B, BLOCK_B))
+    _skinny_gemm_kernel[grid](
+        W, X, Y,
+        M, K, B,
+        W.stride(0), W.stride(1),
+        X.stride(0), X.stride(1),
+        1, M,  # stride_ym, stride_yb : Y is [B, M] contiguous
+        BLOCK_M=BLOCK_M, BLOCK_K=BLOCK_K, BLOCK_B=BLOCK_B,
+        num_warps=num_warps, num_stages=num_stages,
+    )
+
+
+def _tune(W: torch.Tensor, M: int, K: int, bucket: int):
+    """Return (best_cfg, best_ms, cublas_ms) for this shape/bucket."""
+    import triton.testing
+
+    X = torch.randn(bucket, K, dtype=torch.bfloat16, device=W.device)
+    Y = torch.empty((bucket, M), dtype=torch.bfloat16, device=W.device)
+    best, best_t = None, float("inf")
+    for bm, bk, nw, ns in _TUNE_SPACE:
+        cfg = (bm, bk, bucket, nw, ns)
+        try:
+            t = triton.testing.do_bench(
+                lambda: _launch(W, X, Y, M, K, bucket, cfg),
+                warmup=10, rep=50, return_mode="median",
+            )
+        except Exception:
+            continue  # OutOfResources etc.
+        if t < best_t:
+            best, best_t = cfg, t
+    t_cublas = triton.testing.do_bench(
+        lambda: torch.nn.functional.linear(X, W),
+        warmup=10, rep=50, return_mode="median",
+    )
+    if best is None:
+        bm, bk, _, nw, ns = _DEFAULT_CONFIG
+        best = (bm, bk, bucket, nw, ns)
+    return best, best_t, t_cublas
+
+
+def ensure_tuned(W: torch.Tensor) -> None:
+    """Tune W's shape and enable Triton dispatch for it iff it beats cuBLAS.
+
+    Call at WEIGHT-LOAD time (eager, before torch.compile tracing and CUDA
+    graph capture — see module comment). Idempotent per shape.
+    """
+    if torch.compiler.is_compiling():
+        return
+    if W.ndim != 2 or W.dtype != torch.bfloat16 or not W.is_cuda:
+        return
+    if torch.cuda.is_current_stream_capturing():
+        return
+    M, K = W.shape
+    if (M, K) in _ENABLED:
+        return
+    if all((M, K, b) in _CONFIGS for b in (16, 32)):
+        return  # already tuned and judged not-faster-than-cuBLAS
+    wins = 0
+    for bucket in (16, 32):
+        cfg, t_tri, t_cu = _tune(W, M, K, bucket)
+        _CONFIGS[(M, K, bucket)] = cfg
+        if t_tri * _ENABLE_MARGIN < t_cu:
+            wins += 1
+        print(f"[skinny_gemm] tuned (M={M}, K={K}, bucket={bucket}) -> {cfg} "
+              f"triton={t_tri*1e3:.0f}us cublas={t_cu*1e3:.0f}us")
+    if wins == 2:
+        _ENABLED.add((M, K))
+        print(f"[skinny_gemm] ENABLED (M={M}, K={K}) — beats cuBLAS at both buckets")
+    else:
+        print(f"[skinny_gemm] NOT enabled (M={M}, K={K}) — cuBLAS kept")
 
 
 def triton_skinny_gemm(W: torch.Tensor, X: torch.Tensor) -> torch.Tensor:

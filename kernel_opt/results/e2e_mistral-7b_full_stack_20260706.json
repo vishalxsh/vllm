@@ -1,0 +1,177 @@
+{
+  "date": "2026-07-06",
+  "model": "mistralai/Mistral-7B-Instruct-v0.3",
+  "protocol": "4-config protocol; optimised = runtime-tuned skinny GEMM (qkv/o/down/gate_up, cuBLAS-raced enablement at load_weights) + fused gate_up+SiLU kernel",
+  "micro_wins_vs_cublas": {
+    "qkv_6144x4096": 1.5,
+    "o_4096x4096": 1.11,
+    "down_4096x14336": 1.09,
+    "gate_up_28672x4096": 1.16
+  },
+  "summary": {
+    "throughput": {
+      "stock": 1443.7460760551116,
+      "optimised": 1589.1702721547556
+    },
+    "latency_ms": {
+      "stock": 18.457421734929085,
+      "optimised": 17.295118924230337
+    },
+    "throughput_gain": 1.1007269896774374,
+    "latency_gain": 1.0672040947385664
+  },
+  "runs": {
+    "fused_gate_up_silu_latency": {
+      "variant": "fused_gate_up_silu",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "mistralai/Mistral-7B-Instruct-v0.3",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        1.7305138669908047,
+        1.7299936655908823,
+        1.7301195058971643,
+        1.729374684393406,
+        1.729147981852293,
+        1.7295118924230337,
+        1.729025587439537
+      ],
+      "ms_per_token": [
+        17.305138669908047,
+        17.299936655908823,
+        17.301195058971643,
+        17.29374684393406,
+        17.29147981852293,
+        17.295118924230337,
+        17.29025587439537
+      ],
+      "median_ms_per_token": 17.295118924230337,
+      "tokens_per_s": 57.81978166099842,
+      "telemetry": {
+        "n": 12,
+        "clk_mhz": {
+          "min": 2010.0,
+          "max": 2025.0,
+          "mean": 2012.5
+        },
+        "temp_c": {
+          "min": 35.0,
+          "max": 35.0,
+          "mean": 35.0
+        },
+        "power_w": {
+          "min": 347.85,
+          "max": 349.39,
+          "mean": 348.7575
+        }
+      }
+    },
+    "fused_gate_up_silu_throughput": {
+      "variant": "fused_gate_up_silu",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "mistralai/Mistral-7B-Instruct-v0.3",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 61.24232493713498,
+      "elapsed_s": 61.21433411166072,
+      "tokens_per_s": 1589.1702721547556,
+      "telemetry": {
+        "n": 57,
+        "clk_mhz": {
+          "min": 1875.0,
+          "max": 1905.0,
+          "mean": 1894.4736842105262
+        },
+        "temp_c": {
+          "min": 35.0,
+          "max": 36.0,
+          "mean": 35.94736842105263
+        },
+        "power_w": {
+          "min": 348.71,
+          "max": 349.89,
+          "mean": 349.32561403508777
+        }
+      }
+    },
+    "stock_cublas_latency": {
+      "variant": "stock_cublas",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "mistralai/Mistral-7B-Instruct-v0.3",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        1.8460345696657896,
+        1.845733830705285,
+        1.8455944247543812,
+        1.8464636914432049,
+        1.8450211212038994,
+        1.8457421734929085,
+        1.8472374081611633
+      ],
+      "ms_per_token": [
+        18.460345696657896,
+        18.45733830705285,
+        18.455944247543812,
+        18.46463691443205,
+        18.450211212038994,
+        18.457421734929085,
+        18.472374081611633
+      ],
+      "median_ms_per_token": 18.457421734929085,
+      "tokens_per_s": 54.17874795088991,
+      "telemetry": {
+        "n": 12,
+        "clk_mhz": {
+          "min": 1965.0,
+          "max": 1995.0,
+          "mean": 1972.5
+        },
+        "temp_c": {
+          "min": 35.0,
+          "max": 35.0,
+          "mean": 35.0
+        },
+        "power_w": {
+          "min": 348.35,
+          "max": 349.92,
+          "mean": 349.0058333333333
+        }
+      }
+    },
+    "stock_cublas_throughput": {
+      "variant": "stock_cublas",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "mistralai/Mistral-7B-Instruct-v0.3",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 67.36505188420415,
+      "elapsed_s": 67.38026971183717,
+      "tokens_per_s": 1443.7460760551116,
+      "telemetry": {
+        "n": 63,
+        "clk_mhz": {
+          "min": 1890.0,
+          "max": 1920.0,
+          "mean": 1903.3333333333333
+        },
+        "temp_c": {
+          "min": 34.0,
+          "max": 35.0,
+          "mean": 34.96825396825397
+        },
+        "power_w": {
+          "min": 347.75,
+          "max": 349.76,
+          "mean": 349.2315873015873
+        }
+      }
+    }
+  }
+}

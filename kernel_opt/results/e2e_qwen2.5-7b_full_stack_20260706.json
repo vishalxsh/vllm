@@ -1,0 +1,90 @@
+{
+  "date": "2026-07-06",
+  "model": "Qwen/Qwen2.5-7B-Instruct",
+  "protocol": "optimised-variant re-run after skinny GEMM generalisation (runtime-tuned, cuBLAS-raced enablement). Stock baselines from morning run (e2e_qwen2.5-7b_fused_tuned_20260706.json): 1580.3 tok/s, 19.130 ms/tok.",
+  "note": "Load-time race newly enabled Triton for Qwen qkv [4608,3584] (missed by the old hardcoded shape list) -> Qwen improved further: throughput 1632.3->1664.2 tok/s, latency 17.56->17.17 ms/tok. Total vs stock: +5.3% throughput, +11.4% B=1 latency.",
+  "summary": {
+    "throughput_tok_s": 1664.1776515104682,
+    "latency_ms_per_tok": 17.17343768104911,
+    "vs_stock_throughput_gain": 1.0530570523311387,
+    "vs_stock_latency_gain": 1.113929567002765
+  },
+  "runs": {
+    "fused_gate_up_silu_latency": {
+      "variant": "fused_gate_up_silu",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        1.717672735452652,
+        1.7176480647176504,
+        1.717218928039074,
+        1.7173437681049109,
+        1.717039568349719,
+        1.7171779181808233,
+        1.718783950433135
+      ],
+      "ms_per_token": [
+        17.17672735452652,
+        17.176480647176504,
+        17.17218928039074,
+        17.17343768104911,
+        17.17039568349719,
+        17.171779181808233,
+        17.18783950433135
+      ],
+      "median_ms_per_token": 17.17343768104911,
+      "tokens_per_s": 58.22945985377757,
+      "telemetry": {
+        "n": 12,
+        "clk_mhz": {
+          "min": 1995.0,
+          "max": 2025.0,
+          "mean": 1998.75
+        },
+        "temp_c": {
+          "min": 34.0,
+          "max": 35.0,
+          "mean": 34.833333333333336
+        },
+        "power_w": {
+          "min": 348.05,
+          "max": 349.58,
+          "mean": 348.7916666666667
+        }
+      }
+    },
+    "fused_gate_up_silu_throughput": {
+      "variant": "fused_gate_up_silu",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 58.48924595490098,
+      "elapsed_s": 58.455297673121095,
+      "tokens_per_s": 1664.1776515104682,
+      "telemetry": {
+        "n": 54,
+        "clk_mhz": {
+          "min": 1950.0,
+          "max": 1965.0,
+          "mean": 1951.388888888889
+        },
+        "temp_c": {
+          "min": 35.0,
+          "max": 36.0,
+          "mean": 35.129629629629626
+        },
+        "power_w": {
+          "min": 348.6,
+          "max": 349.41,
+          "mean": 349.08759259259256
+        }
+      }
+    }
+  }
+}

@@ -511,17 +511,35 @@ class LlamaModel(nn.Module, EagleModelMixin):
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
 
-        # Tune fused gate_up+SiLU configs now: weight loading runs eagerly,
+        # Tune Triton kernel configs now: weight loading runs eagerly,
         # BEFORE torch.compile tracing / CUDA graph capture freeze the kernel
         # config into the graph. Tuning any later is a silent no-op.
-        from vllm.kernels.triton.fused_gate_up_silu import ensure_tuned
+        # skinny_gemm additionally races each shape against cuBLAS and only
+        # enables dispatch for shapes where Triton wins.
+        from vllm.kernels.triton.fused_gate_up_silu import (
+            ensure_tuned as ensure_fused_tuned)
+        from vllm.kernels.triton.skinny_gemm import (
+            ensure_tuned as ensure_gemm_tuned)
 
         for layer in self.layers:
             mlp = getattr(layer, "mlp", None)
+            attn = getattr(layer, "self_attn", None)
+            candidates = []
             if mlp is not None and hasattr(mlp, "gate_up_proj"):
                 weight = mlp.gate_up_proj.weight
                 if isinstance(weight, torch.Tensor):
-                    ensure_tuned(weight)
+                    ensure_fused_tuned(weight)
+                    candidates.append(weight)
+            if mlp is not None and hasattr(mlp, "down_proj"):
+                candidates.append(mlp.down_proj.weight)
+            if attn is not None:
+                for name in ("qkv_proj", "o_proj"):
+                    proj = getattr(attn, name, None)
+                    if proj is not None:
+                        candidates.append(proj.weight)
+            for weight in candidates:
+                if isinstance(weight, torch.Tensor):
+                    ensure_gemm_tuned(weight)
         return loaded_params
 
 
