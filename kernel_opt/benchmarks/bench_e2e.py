@@ -31,6 +31,8 @@ p.add_argument("--variant", required=True,
 p.add_argument("--mode", required=True, choices=["throughput", "latency"])
 p.add_argument("--out", required=True)
 p.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct")
+p.add_argument("--max-model-len", type=int, default=None,
+               help="Cap context length (e.g. 131k-context models on 24GB)")
 args = p.parse_args()
 
 GPU_INDEX = int(os.environ.get("BENCH_GPU", "3"))
@@ -97,12 +99,16 @@ import torch  # noqa: E402
 max_num_seqs = 32 if args.mode == "throughput" else 1
 print(f"Loading {MODEL} (max_num_seqs={max_num_seqs}) ...")
 t_load = time.time()
+llm_kwargs = {}
+if args.max_model_len is not None:
+    llm_kwargs["max_model_len"] = args.max_model_len
 llm = LLM(
     model=MODEL,
     dtype="bfloat16",
     gpu_memory_utilization=0.90,
     max_num_seqs=max_num_seqs,
     trust_remote_code=True,
+    **llm_kwargs,
 )
 print(f"Model loaded in {time.time()-t_load:.0f}s")
 

@@ -1,0 +1,172 @@
+{
+  "date": "2026-07-06",
+  "model": "NousResearch/Meta-Llama-3.1-8B-Instruct",
+  "protocol": "4-config protocol, max_model_len=8192 (131k default KV cache exceeds 24GB); optimised = runtime-tuned skinny GEMM + fused gate_up+SiLU, all tuning at load",
+  "note": "Third model family. GEMM shapes identical to Mistral-7B (GQA 32q+8kv, inter 14336); all 4 shapes tuned+ENABLED at load inside the vLLM engine (verified in logs, qkv 66us vs cublas 93us). Gains consistent with Mistral: same-code generalisation confirmed.",
+  "summary": {
+    "throughput": {
+      "stock": 1384.057638911016,
+      "optimised": 1514.5795837806218
+    },
+    "latency_ms": {
+      "stock": 19.31003725156188,
+      "optimised": 18.14884342253208
+    },
+    "throughput_gain": 1.0943038361988313,
+    "latency_gain": 1.063981698557615
+  },
+  "runs": {
+    "fused_gate_up_silu_latency": {
+      "variant": "fused_gate_up_silu",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "NousResearch/Meta-Llama-3.1-8B-Instruct",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        1.8156971838325262,
+        1.8147862050682306,
+        1.8145774360746145,
+        1.8158048316836357,
+        1.8146811425685883,
+        1.8157431688159704,
+        1.8148843422532082
+      ],
+      "ms_per_token": [
+        18.156971838325262,
+        18.147862050682306,
+        18.145774360746145,
+        18.158048316836357,
+        18.146811425685883,
+        18.157431688159704,
+        18.14884342253208
+      ],
+      "median_ms_per_token": 18.14884342253208,
+      "tokens_per_s": 55.099929880847604,
+      "telemetry": {
+        "n": 12,
+        "clk_mhz": {
+          "min": 1980.0,
+          "max": 2010.0,
+          "mean": 1991.25
+        },
+        "temp_c": {
+          "min": 35.0,
+          "max": 36.0,
+          "mean": 35.333333333333336
+        },
+        "power_w": {
+          "min": 348.39,
+          "max": 349.27,
+          "mean": 348.81666666666666
+        }
+      }
+    },
+    "fused_gate_up_silu_throughput": {
+      "variant": "fused_gate_up_silu",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "NousResearch/Meta-Llama-3.1-8B-Instruct",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 64.2575346827507,
+      "elapsed_s": 64.2290448397398,
+      "tokens_per_s": 1514.5795837806218,
+      "telemetry": {
+        "n": 60,
+        "clk_mhz": {
+          "min": 1875.0,
+          "max": 1905.0,
+          "mean": 1890.25
+        },
+        "temp_c": {
+          "min": 35.0,
+          "max": 36.0,
+          "mean": 35.983333333333334
+        },
+        "power_w": {
+          "min": 348.07,
+          "max": 349.65,
+          "mean": 349.32
+        }
+      }
+    },
+    "stock_cublas_latency": {
+      "variant": "stock_cublas",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "NousResearch/Meta-Llama-3.1-8B-Instruct",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        1.9323954526335,
+        1.9307840801775455,
+        1.9308872260153294,
+        1.9308582488447428,
+        1.931003725156188,
+        1.9319801405072212,
+        1.9310304801911116
+      ],
+      "ms_per_token": [
+        19.323954526335,
+        19.307840801775455,
+        19.308872260153294,
+        19.308582488447428,
+        19.31003725156188,
+        19.319801405072212,
+        19.310304801911116
+      ],
+      "median_ms_per_token": 19.31003725156188,
+      "tokens_per_s": 51.78653914399443,
+      "telemetry": {
+        "n": 13,
+        "clk_mhz": {
+          "min": 1950.0,
+          "max": 1995.0,
+          "mean": 1966.1538461538462
+        },
+        "temp_c": {
+          "min": 35.0,
+          "max": 36.0,
+          "mean": 35.92307692307692
+        },
+        "power_w": {
+          "min": 348.37,
+          "max": 349.74,
+          "mean": 348.99615384615385
+        }
+      }
+    },
+    "stock_cublas_throughput": {
+      "variant": "stock_cublas",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "NousResearch/Meta-Llama-3.1-8B-Instruct",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 70.59280835278332,
+      "elapsed_s": 70.28609016351402,
+      "tokens_per_s": 1384.057638911016,
+      "telemetry": {
+        "n": 66,
+        "clk_mhz": {
+          "min": 1875.0,
+          "max": 1905.0,
+          "mean": 1891.1363636363637
+        },
+        "temp_c": {
+          "min": 35.0,
+          "max": 36.0,
+          "mean": 35.015151515151516
+        },
+        "power_w": {
+          "min": 347.5,
+          "max": 350.32,
+          "mean": 349.344696969697
+        }
+      }
+    }
+  }
+}

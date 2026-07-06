@@ -24,7 +24,7 @@ for combo in "stock_cublas throughput" "fused_gate_up_silu throughput" \
   cooldown
   BENCH_GPU=$GPU CUDA_VISIBLE_DEVICES=$GPU .venv/bin/python \
     $(dirname $0)/bench_e2e.py --variant $VARIANT --mode $MODE --out $OUT \
-    --model "$MODEL" \
+    --model "$MODEL" ${MAX_MODEL_LEN:+--max-model-len $MAX_MODEL_LEN} \
     > $SCRATCH/${PREFIX}_${VARIANT}_${MODE}.log 2>&1
   RC=$?
   if [ $RC -ne 0 ]; then
