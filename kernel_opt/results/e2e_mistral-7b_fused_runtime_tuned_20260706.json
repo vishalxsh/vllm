@@ -1,0 +1,248 @@
+{
+  "date": "2026-07-06",
+  "model": "mistralai/Mistral-7B-Instruct-v0.3",
+  "protocol": "4-config protocol + fused re-runs with load_weights-time runtime tuning",
+  "note": "Multi-LLM generalisation of the fused gate_up+SiLU kernel via LlamaMLP hook + shape-keyed runtime tuning (tuned at load_weights; fullgraph-compile- and capture-safe). Tuning verified firing at load (2 buckets). E2E: fused is FLAT vs stock on Mistral (throughput ~1445 tok/s, B=1 latency ~54.25 tok/s) with both default and tuned configs \u2014 the Qwen-7B +8.7% latency win comes mostly from the skinny GEMM covering qkv/o/down shapes (still hardcoded to Qwen-7B, inactive here), not the fused MLP kernel alone. Infra deliverable proven: same kernel code self-tunes per shape across model families with no mid-serving noise.",
+  "summary_tok_s": {
+    "throughput": {
+      "stock": 1445.916280325955,
+      "fused_default": 1444.3253892713035,
+      "fused_tuned": 1444.763458524249
+    },
+    "latency": {
+      "stock": 54.244683201812755,
+      "fused_default": 54.27081851804522,
+      "fused_tuned": 54.26488245076673
+    }
+  },
+  "runs": {
+    "fused_gate_up_silu_latency_defaultcfg": {
+      "variant": "fused_gate_up_silu",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "mistralai/Mistral-7B-Instruct-v0.3",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        1.8426108676940203,
+        1.842593315988779,
+        1.8424116242676973,
+        1.8429606556892395,
+        1.8432056736201048,
+        1.8427696153521538,
+        1.842496419325471
+      ],
+      "ms_per_token": [
+        18.426108676940203,
+        18.42593315988779,
+        18.424116242676973,
+        18.429606556892395,
+        18.432056736201048,
+        18.427696153521538,
+        18.42496419325471
+      ],
+      "median_ms_per_token": 18.426108676940203,
+      "tokens_per_s": 54.27081851804522,
+      "telemetry": {
+        "n": 12,
+        "clk_mhz": {
+          "min": 1980.0,
+          "max": 1995.0,
+          "mean": 1985.0
+        },
+        "temp_c": {
+          "min": 33.0,
+          "max": 34.0,
+          "mean": 33.75
+        },
+        "power_w": {
+          "min": 348.71,
+          "max": 349.5,
+          "mean": 349.06
+        }
+      }
+    },
+    "fused_gate_up_silu_throughput_defaultcfg": {
+      "variant": "fused_gate_up_silu",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "mistralai/Mistral-7B-Instruct-v0.3",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 67.36387407965958,
+      "elapsed_s": 67.35324375145137,
+      "tokens_per_s": 1444.3253892713035,
+      "telemetry": {
+        "n": 63,
+        "clk_mhz": {
+          "min": 1890.0,
+          "max": 1920.0,
+          "mean": 1905.0
+        },
+        "temp_c": {
+          "min": 34.0,
+          "max": 35.0,
+          "mean": 34.46031746031746
+        },
+        "power_w": {
+          "min": 347.22,
+          "max": 350.3,
+          "mean": 349.0650793650793
+        }
+      }
+    },
+    "stock_cublas_latency_defaultcfg": {
+      "variant": "stock_cublas",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "mistralai/Mistral-7B-Instruct-v0.3",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        1.8421572539955378,
+        1.843661593273282,
+        1.8435097355395555,
+        1.8434805627912283,
+        1.8435771632939577,
+        1.84267333522439,
+        1.843498645350337
+      ],
+      "ms_per_token": [
+        18.421572539955378,
+        18.43661593273282,
+        18.435097355395555,
+        18.434805627912283,
+        18.435771632939577,
+        18.4267333522439,
+        18.43498645350337
+      ],
+      "median_ms_per_token": 18.43498645350337,
+      "tokens_per_s": 54.244683201812755,
+      "telemetry": {
+        "n": 12,
+        "clk_mhz": {
+          "min": 1980.0,
+          "max": 2010.0,
+          "mean": 1983.75
+        },
+        "temp_c": {
+          "min": 34.0,
+          "max": 34.0,
+          "mean": 34.0
+        },
+        "power_w": {
+          "min": 348.52,
+          "max": 349.64,
+          "mean": 349.12166666666667
+        }
+      }
+    },
+    "stock_cublas_throughput_defaultcfg": {
+      "variant": "stock_cublas",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "mistralai/Mistral-7B-Instruct-v0.3",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 67.60941754281521,
+      "elapsed_s": 67.27913733571768,
+      "tokens_per_s": 1445.916280325955,
+      "telemetry": {
+        "n": 63,
+        "clk_mhz": {
+          "min": 1890.0,
+          "max": 1920.0,
+          "mean": 1904.7619047619048
+        },
+        "temp_c": {
+          "min": 33.0,
+          "max": 34.0,
+          "mean": 33.6031746031746
+        },
+        "power_w": {
+          "min": 347.88,
+          "max": 349.62,
+          "mean": 349.0473015873016
+        }
+      }
+    },
+    "fused_gate_up_silu_latency_tuned": {
+      "variant": "fused_gate_up_silu",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "mistralai/Mistral-7B-Instruct-v0.3",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        1.8427499886602163,
+        1.8428124319761992,
+        1.842452334240079,
+        1.842468673363328,
+        1.8428457286208868,
+        1.843191135674715,
+        1.8428513426333666
+      ],
+      "ms_per_token": [
+        18.427499886602163,
+        18.42812431976199,
+        18.42452334240079,
+        18.42468673363328,
+        18.428457286208868,
+        18.43191135674715,
+        18.428513426333666
+      ],
+      "median_ms_per_token": 18.42812431976199,
+      "tokens_per_s": 54.26488245076673,
+      "telemetry": {
+        "n": 12,
+        "clk_mhz": {
+          "min": 1980.0,
+          "max": 1995.0,
+          "mean": 1983.75
+        },
+        "temp_c": {
+          "min": 33.0,
+          "max": 34.0,
+          "mean": 33.666666666666664
+        },
+        "power_w": {
+          "min": 348.08,
+          "max": 349.48,
+          "mean": 348.87416666666667
+        }
+      }
+    },
+    "fused_gate_up_silu_throughput_tuned": {
+      "variant": "fused_gate_up_silu",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "mistralai/Mistral-7B-Instruct-v0.3",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 67.32309004478157,
+      "elapsed_s": 67.33282145671546,
+      "tokens_per_s": 1444.763458524249,
+      "telemetry": {
+        "n": 63,
+        "clk_mhz": {
+          "min": 1905.0,
+          "max": 1920.0,
+          "mean": 1906.904761904762
+        },
+        "temp_c": {
+          "min": 33.0,
+          "max": 34.0,
+          "mean": 33.84126984126984
+        },
+        "power_w": {
+          "min": 347.71,
+          "max": 349.67,
+          "mean": 349.03492063492064
+        }
+      }
+    }
+  }
+}

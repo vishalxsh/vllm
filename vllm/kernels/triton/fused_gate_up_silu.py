@@ -82,10 +82,16 @@ def _fused_gate_up_silu_kernel(
 
 
 # ---------------------------------------------------------------------------
-# Configs  (M_half, K, B_bucket) -> (BLOCK_M, BLOCK_K, BLOCK_B, nw, ns)
-# Autotuned offline on RTX 3090 (sweep over BLOCK_M/K/B x warps x stages,
-# correctness-gated, interleaved refinement): BLOCK_K=128 wins despite the
-# double-accumulator register pressure, matching the plain skinny GEMM.
+# Shape-keyed runtime tuning.
+#
+# _CONFIGS is a cache: (M_half, K, B_bucket) -> (BLOCK_M, BLOCK_K, BLOCK_B,
+# num_warps, num_stages). Known shapes are pre-seeded from offline sweeps;
+# an unseen shape is tuned once on its first eager call (~1-2s, cached for
+# the process lifetime), so the same kernel code serves any SiLU-MLP model
+# (Qwen2, Llama, Mistral, ...). Tuning never runs during CUDA graph capture
+# (do_bench syncs are illegal mid-capture) — the default config is used
+# there instead; vLLM's eager warmup runs before capture, so in practice
+# new shapes are tuned at model-load time.
 # ---------------------------------------------------------------------------
 
 def _bucket_b(B: int) -> int:
@@ -93,18 +99,104 @@ def _bucket_b(B: int) -> int:
 
 
 _CONFIGS = {
+    # Qwen2.5-7B, autotuned offline on RTX 3090 (2026-07-06 256-config
+    # sweep): BLOCK_K=128 wins despite double-accumulator pressure.
     (18944, 3584, 16): (64, 128, 16, 4, 3),
     (18944, 3584, 32): (64, 128, 32, 4, 3),
 }
 _DEFAULT_CONFIG = (32, 64, 16, 4, 2)
 
+# Pruned candidate space for runtime tuning: winners and near-winners of
+# the offline sweep, as (BLOCK_M, BLOCK_K, num_warps, num_stages).
+_TUNE_SPACE = [
+    (64, 128, 4, 3), (64, 128, 4, 2), (64, 128, 8, 3), (64, 128, 8, 2),
+    (128, 128, 4, 2), (128, 128, 8, 2),
+    (64, 64, 4, 3), (64, 64, 4, 4),
+    (32, 128, 4, 3), (32, 64, 4, 3), (32, 64, 4, 2), (128, 64, 4, 2),
+]
 
-def _pick_config(M_half: int, K: int, B: int):
-    cfg = _CONFIGS.get((M_half, K, _bucket_b(B)))
-    if cfg is not None:
-        return cfg
-    bm, bk, _, nw, ns = _DEFAULT_CONFIG
-    return (bm, bk, _bucket_b(B), nw, ns)
+
+def _launch(W, X, Y, M_half, K, B, cfg):
+    BLOCK_M, BLOCK_K, BLOCK_B, num_warps, num_stages = cfg
+    grid = (triton.cdiv(M_half, BLOCK_M), triton.cdiv(B, BLOCK_B))
+    _fused_gate_up_silu_kernel[grid](
+        W, X, Y,
+        M_half, K, B,
+        W.stride(0), W.stride(1),
+        X.stride(0), X.stride(1),
+        1, M_half,  # stride_ym=1, stride_yb=M_half : Y is [B, M_half] contiguous
+        BLOCK_M=BLOCK_M, BLOCK_K=BLOCK_K, BLOCK_B=BLOCK_B,
+        num_warps=num_warps, num_stages=num_stages,
+    )
+
+
+@torch.compiler.disable
+def _tune(W: torch.Tensor, M_half: int, K: int, bucket: int):
+    import triton.testing
+
+    X = torch.randn(bucket, K, dtype=torch.bfloat16, device=W.device)
+    Y = torch.empty((bucket, M_half), dtype=torch.bfloat16, device=W.device)
+    best, best_t = None, float("inf")
+    for bm, bk, nw, ns in _TUNE_SPACE:
+        cfg = (bm, bk, bucket, nw, ns)
+        try:
+            t = triton.testing.do_bench(
+                lambda: _launch(W, X, Y, M_half, K, bucket, cfg),
+                warmup=10, rep=50, return_mode="median",
+            )
+        except Exception:
+            continue  # OutOfResources etc. — config invalid on this GPU
+        if t < best_t:
+            best, best_t = cfg, t
+    if best is None:
+        bm, bk, _, nw, ns = _DEFAULT_CONFIG
+        best = (bm, bk, bucket, nw, ns)
+    print(f"[fused_gate_up_silu] tuned (M_half={M_half}, K={K}, "
+          f"bucket={bucket}) -> {best} ({best_t*1e3:.0f}us)")
+    return best
+
+
+def _pick_config(W: torch.Tensor, M_half: int, K: int, B: int):
+    bucket = _bucket_b(B)
+    key = (M_half, K, bucket)
+    cfg = _CONFIGS.get(key)
+    if cfg is None:
+        # Never tune during dynamo tracing (vLLM compiles fullgraph — a
+        # graph break is a hard error) or CUDA graph capture (do_bench
+        # syncs are illegal mid-capture). An unseeded shape here means
+        # ensure_tuned() was not called at weight-load time; degrade to
+        # the default config rather than crash.
+        if torch.compiler.is_compiling() or torch.cuda.is_current_stream_capturing():
+            bm, bk, _, nw, ns = _DEFAULT_CONFIG
+            return (bm, bk, bucket, nw, ns)
+        cfg = _tune(W, M_half, K, bucket)
+        _CONFIGS[key] = cfg
+    return cfg
+
+
+def ensure_tuned(W: torch.Tensor) -> None:
+    """Tune all B-buckets for W's shape if not yet cached.
+
+    Call this at WEIGHT-LOAD time (e.g. from Model.load_weights), which
+    runs eagerly. Under vLLM's fullgraph torch.compile the kernel config
+    is frozen into the traced graph as constants, and the decode-sized
+    calls first execute during CUDA graph capture — so tuning any later
+    than load is either a hard compile error or a silent no-op, and an
+    unseeded shape would bake the default config into the graphs.
+    """
+    if torch.compiler.is_compiling():
+        return  # must not tune (or graph-break) during tracing
+    if W.ndim != 2 or W.dtype != torch.bfloat16 or not W.is_cuda:
+        return
+    if W.shape[0] % 2 != 0:
+        return
+    M_half, K = W.shape[0] // 2, W.shape[1]
+    if torch.cuda.is_current_stream_capturing():
+        return
+    for bucket in (16, 32):
+        key = (M_half, K, bucket)
+        if key not in _CONFIGS:
+            _CONFIGS[key] = _tune(W, M_half, K, bucket)
 
 
 def triton_fused_gate_up_silu(W: torch.Tensor, X: torch.Tensor) -> torch.Tensor:
@@ -125,19 +217,9 @@ def triton_fused_gate_up_silu(W: torch.Tensor, X: torch.Tensor) -> torch.Tensor:
     M_half = M2 // 2
     B      = X.shape[0]
 
-    BLOCK_M, BLOCK_K, BLOCK_B, num_warps, num_stages = _pick_config(M_half, K, B)
-
-    Y    = torch.empty((B, M_half), dtype=torch.bfloat16, device=W.device)
-    grid = (triton.cdiv(M_half, BLOCK_M), triton.cdiv(B, BLOCK_B))
-    _fused_gate_up_silu_kernel[grid](
-        W, X, Y,
-        M_half, K, B,
-        W.stride(0), W.stride(1),
-        X.stride(0), X.stride(1),
-        1, M_half,  # stride_ym=1, stride_yb=M_half : Y is [B, M_half] contiguous
-        BLOCK_M=BLOCK_M, BLOCK_K=BLOCK_K, BLOCK_B=BLOCK_B,
-        num_warps=num_warps, num_stages=num_stages,
-    )
+    cfg = _pick_config(W, M_half, K, B)
+    Y   = torch.empty((B, M_half), dtype=torch.bfloat16, device=W.device)
+    _launch(W, X, Y, M_half, K, B, cfg)
     return Y
 
 

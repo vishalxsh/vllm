@@ -531,6 +531,18 @@ class Qwen2Model(nn.Module, EagleModelMixin):
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
+
+        # Tune fused gate_up+SiLU configs now: weight loading runs eagerly,
+        # BEFORE torch.compile tracing / CUDA graph capture freeze the kernel
+        # config into the graph. Tuning any later is a silent no-op.
+        from vllm.kernels.triton.fused_gate_up_silu import ensure_tuned
+
+        for layer in self.layers:
+            mlp = getattr(layer, "mlp", None)
+            if mlp is not None and hasattr(mlp, "gate_up_proj"):
+                weight = mlp.gate_up_proj.weight
+                if isinstance(weight, torch.Tensor):
+                    ensure_tuned(weight)
         return loaded_params
 
 

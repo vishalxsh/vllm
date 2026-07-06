@@ -65,11 +65,13 @@ class StockCuBLASVariant(KernelVariant):
     def active(self) -> Iterator[None]:
         import vllm.kernels.triton.gemv as gemv_mod
         import vllm.kernels.triton.skinny_gemm as skinny_mod
+        from vllm.model_executor.models.llama import LlamaMLP
         from vllm.model_executor.models.qwen2 import Qwen2MLP
 
         original_gemv   = gemv_mod.triton_gemv
         original_skinny = skinny_mod.triton_skinny_gemm
-        original_forward = Qwen2MLP.forward
+        original_qwen_forward  = Qwen2MLP.forward
+        original_llama_forward = LlamaMLP.forward
 
         def _cublas_gemv(weight: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
             return torch.mv(weight, x)
@@ -86,12 +88,14 @@ class StockCuBLASVariant(KernelVariant):
         gemv_mod.triton_gemv         = _cublas_gemv
         skinny_mod.triton_skinny_gemm = _cublas_gemm
         Qwen2MLP.forward             = _unfused_forward
+        LlamaMLP.forward             = _unfused_forward
         try:
             yield
         finally:
             gemv_mod.triton_gemv         = original_gemv
             skinny_mod.triton_skinny_gemm = original_skinny
-            Qwen2MLP.forward             = original_forward
+            Qwen2MLP.forward             = original_qwen_forward
+            LlamaMLP.forward             = original_llama_forward
 
 
 class TritonGemvVariant(KernelVariant):
