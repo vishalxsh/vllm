@@ -1,0 +1,171 @@
+{
+  "date": "2026-07-06",
+  "protocol": "fresh process per config, cooldown <45C, 1s telemetry, warmup discarded; throughput: 190 prompts x 512 tok @ max_num_seqs=32; latency: 7 x 100-tok repeats @ max_num_seqs=1",
+  "note": "Re-run of 2026-07-05 protocol after offline autotune of fused_gate_up_silu configs (BLOCK_K 64->128). E2E within noise of 07-05: kernel-level +1.5-2.6% does not move e2e (power-limited, continuous batching, kernel at ~92% HBM BW).",
+  "summary": {
+    "throughput_tok_s": {
+      "stock": 1580.3282953898665,
+      "fused": 1632.0286020335166
+    },
+    "latency_ms_per_tok": {
+      "stock": 19.13006516173482,
+      "fused": 17.602412849664688
+    },
+    "throughput_gain": 1.032714915498552,
+    "latency_gain": 1.0867865289331191
+  },
+  "runs": {
+    "fused_gate_up_silu_latency": {
+      "variant": "fused_gate_up_silu",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        1.7602412849664688,
+        1.7592932470142841,
+        1.760452263057232,
+        1.760020425543189,
+        1.7602814640849829,
+        1.7602480556815863,
+        1.759596835821867
+      ],
+      "ms_per_token": [
+        17.602412849664688,
+        17.59293247014284,
+        17.60452263057232,
+        17.60020425543189,
+        17.60281464084983,
+        17.602480556815863,
+        17.59596835821867
+      ],
+      "median_ms_per_token": 17.602412849664688,
+      "tokens_per_s": 56.810393469384465,
+      "telemetry": {
+        "n": 12,
+        "clk_mhz": {
+          "min": 1980.0,
+          "max": 2010.0,
+          "mean": 1987.5
+        },
+        "temp_c": {
+          "min": 34.0,
+          "max": 34.0,
+          "mean": 34.0
+        },
+        "power_w": {
+          "min": 348.42,
+          "max": 349.21,
+          "mean": 348.90166666666664
+        }
+      }
+    },
+    "fused_gate_up_silu_throughput": {
+      "variant": "fused_gate_up_silu",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 59.61125660315156,
+      "elapsed_s": 59.60679848305881,
+      "tokens_per_s": 1632.0286020335166,
+      "telemetry": {
+        "n": 56,
+        "clk_mhz": {
+          "min": 1890.0,
+          "max": 1920.0,
+          "mean": 1907.6785714285713
+        },
+        "temp_c": {
+          "min": 35.0,
+          "max": 35.0,
+          "mean": 35.0
+        },
+        "power_w": {
+          "min": 347.98,
+          "max": 350.02,
+          "mean": 349.09999999999997
+        }
+      }
+    },
+    "stock_cublas_latency": {
+      "variant": "stock_cublas",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        1.9134101886302233,
+        1.9128401335328817,
+        1.912915375083685,
+        1.913651879876852,
+        1.9132377430796623,
+        1.913006516173482,
+        1.9127496685832739
+      ],
+      "ms_per_token": [
+        19.134101886302233,
+        19.128401335328817,
+        19.12915375083685,
+        19.13651879876852,
+        19.132377430796623,
+        19.13006516173482,
+        19.12749668583274
+      ],
+      "median_ms_per_token": 19.13006516173482,
+      "tokens_per_s": 52.27373725836878,
+      "telemetry": {
+        "n": 13,
+        "clk_mhz": {
+          "min": 1950.0,
+          "max": 1995.0,
+          "mean": 1967.3076923076924
+        },
+        "temp_c": {
+          "min": 34.0,
+          "max": 35.0,
+          "mean": 34.84615384615385
+        },
+        "power_w": {
+          "min": 348.62,
+          "max": 349.32,
+          "mean": 348.95000000000005
+        }
+      }
+    },
+    "stock_cublas_throughput": {
+      "variant": "stock_cublas",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 61.44098570942879,
+      "elapsed_s": 61.55682985857129,
+      "tokens_per_s": 1580.3282953898665,
+      "telemetry": {
+        "n": 58,
+        "clk_mhz": {
+          "min": 1830.0,
+          "max": 1920.0,
+          "mean": 1856.3793103448277
+        },
+        "temp_c": {
+          "min": 33.0,
+          "max": 35.0,
+          "mean": 34.03448275862069
+        },
+        "power_w": {
+          "min": 343.38,
+          "max": 350.44,
+          "mean": 349.205
+        }
+      }
+    }
+  }
+}

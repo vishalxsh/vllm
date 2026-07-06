@@ -83,8 +83,9 @@ def _fused_gate_up_silu_kernel(
 
 # ---------------------------------------------------------------------------
 # Configs  (M_half, K, B_bucket) -> (BLOCK_M, BLOCK_K, BLOCK_B, nw, ns)
-# Two accumulators per block raises register pressure vs plain GEMM,
-# so we start with BLOCK_K=64 (vs 128 for plain GEMM).
+# Autotuned offline on RTX 3090 (sweep over BLOCK_M/K/B x warps x stages,
+# correctness-gated, interleaved refinement): BLOCK_K=128 wins despite the
+# double-accumulator register pressure, matching the plain skinny GEMM.
 # ---------------------------------------------------------------------------
 
 def _bucket_b(B: int) -> int:
@@ -92,8 +93,8 @@ def _bucket_b(B: int) -> int:
 
 
 _CONFIGS = {
-    (18944, 3584, 16): (64, 64, 16, 4, 3),
-    (18944, 3584, 32): (64, 64, 32, 4, 3),
+    (18944, 3584, 16): (64, 128, 16, 4, 3),
+    (18944, 3584, 32): (64, 128, 32, 4, 3),
 }
 _DEFAULT_CONFIG = (32, 64, 16, 4, 2)
 
