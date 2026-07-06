@@ -1,0 +1,172 @@
+{
+  "date": "2026-07-06",
+  "model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "protocol": "same as e2e_qwen2.5-7b_fused_tuned_20260706.json (4 configs, fresh procs, cooldown <45C, 1s telemetry)",
+  "note": "Generalisation test: fused_gate_up_silu triggers on any Qwen2 model (no shape gate) via _DEFAULT_CONFIG; skinny_gemm dispatch does NOT trigger (hardcoded 7B shapes). Result: fused kernel is a wash on 1.5B \u2014 all 4 numbers within noise. Kernel wins are 7B-specific unless 1.5B shapes are tuned; step is overhead/attention-dominated at this size. Correctness verified on 1.5B shapes (M_half=8960, K=1536) B=1-32 before running.",
+  "summary": {
+    "throughput_tok_s": {
+      "stock": 5104.002228343469,
+      "fused": 5096.385027164748
+    },
+    "latency_ms_per_tok": {
+      "stock": 5.087644923478365,
+      "fused": 5.086328610777855
+    },
+    "throughput_gain": 0.9985076023014995,
+    "latency_gain": 1.0002587942701384
+  },
+  "runs": {
+    "fused_gate_up_silu_latency": {
+      "variant": "fused_gate_up_silu",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        0.5087037868797779,
+        0.5085424389690161,
+        0.5084654092788696,
+        0.5085016470402479,
+        0.508735666051507,
+        0.5088058710098267,
+        0.5086328610777855
+      ],
+      "ms_per_token": [
+        5.087037868797779,
+        5.085424389690161,
+        5.084654092788696,
+        5.085016470402479,
+        5.08735666051507,
+        5.088058710098267,
+        5.086328610777855
+      ],
+      "median_ms_per_token": 5.086328610777855,
+      "tokens_per_s": 196.60546467269432,
+      "telemetry": {
+        "n": 4,
+        "clk_mhz": {
+          "min": 2010.0,
+          "max": 2025.0,
+          "mean": 2013.75
+        },
+        "temp_c": {
+          "min": 33.0,
+          "max": 35.0,
+          "mean": 34.0
+        },
+        "power_w": {
+          "min": 343.5,
+          "max": 346.71,
+          "mean": 345.5225
+        }
+      }
+    },
+    "fused_gate_up_silu_throughput": {
+      "variant": "fused_gate_up_silu",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 19.147205352783203,
+      "elapsed_s": 19.088039753958583,
+      "tokens_per_s": 5096.385027164748,
+      "telemetry": {
+        "n": 18,
+        "clk_mhz": {
+          "min": 2025.0,
+          "max": 2040.0,
+          "mean": 2036.6666666666667
+        },
+        "temp_c": {
+          "min": 34.0,
+          "max": 35.0,
+          "mean": 34.388888888888886
+        },
+        "power_w": {
+          "min": 343.98,
+          "max": 348.06,
+          "mean": 346.7344444444445
+        }
+      }
+    },
+    "stock_cublas_latency": {
+      "variant": "stock_cublas",
+      "mode": "latency",
+      "gpu": 3,
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "max_num_seqs": 1,
+      "output_len": 100,
+      "repeats_s": [
+        0.5086714588105679,
+        0.5099426005035639,
+        0.5087773613631725,
+        0.5084652286022902,
+        0.5086645092815161,
+        0.5089276637881994,
+        0.5087644923478365
+      ],
+      "ms_per_token": [
+        5.086714588105679,
+        5.099426005035639,
+        5.087773613631725,
+        5.0846522860229015,
+        5.086645092815161,
+        5.089276637881994,
+        5.087644923478365
+      ],
+      "median_ms_per_token": 5.087644923478365,
+      "tokens_per_s": 196.55459746909997,
+      "telemetry": {
+        "n": 4,
+        "clk_mhz": {
+          "min": 1995.0,
+          "max": 2025.0,
+          "mean": 2010.0
+        },
+        "temp_c": {
+          "min": 34.0,
+          "max": 35.0,
+          "mean": 34.25
+        },
+        "power_w": {
+          "min": 346.12,
+          "max": 347.95,
+          "mean": 347.13
+        }
+      }
+    },
+    "stock_cublas_throughput": {
+      "variant": "stock_cublas",
+      "mode": "throughput",
+      "gpu": 3,
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "max_num_seqs": 32,
+      "num_prompts": 190,
+      "output_len": 512,
+      "warmup_s": 19.519240524619818,
+      "elapsed_s": 19.059552807360888,
+      "tokens_per_s": 5104.002228343469,
+      "telemetry": {
+        "n": 18,
+        "clk_mhz": {
+          "min": 2025.0,
+          "max": 2040.0,
+          "mean": 2038.3333333333333
+        },
+        "temp_c": {
+          "min": 33.0,
+          "max": 34.0,
+          "mean": 33.77777777777778
+        },
+        "power_w": {
+          "min": 343.5,
+          "max": 348.39,
+          "mean": 346.1822222222222
+        }
+      }
+    }
+  }
+}
