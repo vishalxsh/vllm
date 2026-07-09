@@ -631,7 +631,20 @@ class LlamaForCausalLM(
             self,
             skip_prefixes=(["lm_head."] if self.config.tie_word_embeddings else None),
         )
-        return loader.load_weights(weights)
+        loaded = loader.load_weights(weights)
+        self._ensure_lm_head_tuned()
+        return loaded
+
+    def _ensure_lm_head_tuned(self) -> None:
+        # lm_head is the single largest decode GEMM (vocab x hidden) and its
+        # matmul routes through the same dispatch as the per-layer projections
+        # (UnquantizedEmbeddingMethod.apply), so race it too. Same weight-load
+        # window constraint as the per-layer tuning in LlamaModel.load_weights.
+        lm_weight = getattr(self.lm_head, "weight", None)
+        if isinstance(lm_weight, torch.Tensor):
+            from vllm.kernels.triton.skinny_gemm import (
+                ensure_tuned as ensure_gemm_tuned)
+            ensure_gemm_tuned(lm_weight)
 
 
 class LlamaBidirectionalForSequenceClassification(as_seq_cls_model(LlamaForCausalLM)):
