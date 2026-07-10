@@ -1,0 +1,28 @@
+{
+  "created_at": "2026-06-12T14:43:41.102095+00:00",
+  "campaigns": [
+    {
+      "case": "skinny-gemm",
+      "git_url": "https://github.com/vishalxsh/vllm.git",
+      "branch": "benchmark/0/skinny-gemm",
+      "project_id": "61d04631-1633-4a2a-824a-99b20de32543",
+      "run_id": "ded99e59-e999-4531-bd8b-dc93a80db586",
+      "model": "dddffda9-09c8-48d7-b9a3-0dd155868c01",
+      "versions": 2,
+      "task": "Optimise the Triton skinny GEMM kernel for decode-time speedup over cuBLAS.",
+      "launched_at": "2026-06-12T14:43:41.430752+00:00",
+      "fitness_metric": "geomean_speedup_all"
+    },
+    {
+      "case": "skinny-gemm-attn",
+      "git_url": "https://github.com/vishalxsh/vllm.git",
+      "branch": "benchmark/0/skinny-gemm",
+      "project_id": "61d04631-1633-4a2a-824a-99b20de32543",
+      "run_id": "770c1dc2-8ace-4728-92f5-83b22ed7306d",
+      "model": "dddffda9-09c8-48d7-b9a3-0dd155868c01",
+      "versions": 2,
+      "task": "Improve the Triton skinny GEMM kernel specifically for the attn_proj shape W=[3584,3584] at batch sizes 1-32 (the hardest shape). Try different tile sizes, num_warps, num_stages or split-K for that shape's _CONFIGS entries.",
+      "launched_at": "2026-06-12T15:03:13.312339+00:00"
+    }
+  ]
+}

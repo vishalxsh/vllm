@@ -1,0 +1,78 @@
+# Benchmark case registry — DATA, not code.
+# Add cases here; the tool scripts read this file and never need to change.
+#
+# Each case:
+#   git_url          repo to optimise (must be accessible from the runner)
+#   branch           branch that contains the benchmark harness
+#   key_id           Artemis GitHub key ID with read access to the repo
+#                      register once:  artemis key add --provider github --token <PAT>
+#                      list ids:       artemis key list
+#   project_id       (optional) Artemis project UUID — set after first import to
+#                    skip re-importing on subsequent runs; omit to auto-import
+#   compile_cmd      build command (run by the runner's /bin/sh)
+#   test_cmd         correctness test — must exit 0 iff the candidate is correct
+#   benchmark_cmd    benchmark — must write artemis_results.json at the repo root
+#   task             Discovery prompt describing what to optimise
+#   fitness_metric   key in artemis_results.json to use as the score (null = set later)
+#   higher_is_better (optional, default true) — whether higher values are better
+
+# ─── vLLM: Triton skinny-GEMM kernel ──────────────────────────────────────────
+skinny-gemm:
+  git_url: https://github.com/vishalxsh/vllm.git
+  branch: benchmark/0/skinny-gemm
+  key_id: 87b89585-0e6b-43cf-a178-74df42d887e0
+  project_id: 61d04631-1633-4a2a-824a-99b20de32543
+  compile_cmd: >-
+    uv venv --python 3.12 &&
+    VLLM_VERSION_OVERRIDE=0.1.0 VLLM_USE_PRECOMPILED=1
+    uv pip install -p .venv -e . --torch-backend=auto
+  test_cmd: 'CUDA_VISIBLE_DEVICES=3 .venv/bin/python kernel_opt/kernels/skinny_gemm.py'
+  benchmark_cmd: 'CUDA_VISIBLE_DEVICES=3 .venv/bin/python kernel_opt/benchmarks/bench_skinny_gemm.py'
+  task: Optimise the Triton skinny GEMM kernel for decode-time speedup over cuBLAS.
+  fitness_metric: geomean_speedup_all
+  higher_is_better: true
+
+skinny-gemm-attn:
+  git_url: https://github.com/vishalxsh/vllm.git
+  branch: benchmark/0/skinny-gemm
+  key_id: 87b89585-0e6b-43cf-a178-74df42d887e0
+  project_id: 61d04631-1633-4a2a-824a-99b20de32543
+  compile_cmd: >-
+    uv venv --python 3.12 &&
+    VLLM_VERSION_OVERRIDE=0.1.0 VLLM_USE_PRECOMPILED=1
+    uv pip install -p .venv -e . --torch-backend=auto
+  test_cmd: 'CUDA_VISIBLE_DEVICES=3 .venv/bin/python kernel_opt/kernels/skinny_gemm.py'
+  benchmark_cmd: 'CUDA_VISIBLE_DEVICES=3 .venv/bin/python kernel_opt/benchmarks/bench_skinny_gemm.py'
+  task: >-
+    Improve the Triton skinny GEMM kernel specifically for the attn_proj shape
+    W=[3584,3584] at batch sizes 1–32. Try different tile sizes, num_warps,
+    num_stages, or split-K for that shape's _CONFIGS entries.
+  fitness_metric: speedup_attn_proj_B1
+  higher_is_better: true
+
+# ─── External cases (need their own target hardware + harness) ─────────────────
+# These are registered so the tool can import and launch them when the hardware
+# is available. They require a GitHub key scoped to the turintech organisation
+# (replace the key_id placeholder) and their own runner instances.
+
+zendnn:
+  git_url: https://github.com/turintech/ZenDNN-fork.git
+  branch: benchmark/artemis-benchdnn
+  key_id: 87b89585-0e6b-43cf-a178-74df42d887e0   # TODO: replace with turintech-scoped key
+  project_id: a39af940-8b04-4b60-9bfb-51d73a75289d
+  compile_cmd: 'bash scripts/artemis_compile_benchdnn.sh "$PWD"'
+  test_cmd: 'bash scripts/artemis_norm_quant_check.sh "$PWD"'
+  benchmark_cmd: 'bash scripts/artemis_bench_benchdnn.sh "$PWD"'
+  task: Optimise the ZenDNN benchdnn matmul kernels.
+  fitness_metric: null   # set once the harness defines its output key
+
+tensorrt-llm:
+  git_url: https://github.com/turintech/TensorRT-LLM.git
+  branch: discovery/gen3-v19-int8-woq-cpp-gated-validation-08ba4
+  key_id: 87b89585-0e6b-43cf-a178-74df42d887e0   # TODO: replace with turintech-scoped key
+  project_id: f025df33-f851-4953-bb6b-66bda7048e38
+  compile_cmd: "bash scripts/artemis_compile.sh"   # TODO: fill in when harness exists
+  test_cmd: "bash scripts/artemis_test.sh"
+  benchmark_cmd: "bash scripts/artemis_bench.sh"
+  task: Optimise the int8 weight-only-quant fused gated GEMM kernel.
+  fitness_metric: null
