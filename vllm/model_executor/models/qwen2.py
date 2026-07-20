@@ -114,10 +114,10 @@ class Qwen2MLP(nn.Module):
         B = x.shape[0]
         weight = self.gate_up_proj.weight
         if (B <= 32
-                and x.dtype == torch.bfloat16
+                and x.dtype in (torch.bfloat16, torch.float16)
                 and x.is_cuda
                 and isinstance(weight, torch.Tensor)
-                and weight.dtype == torch.bfloat16):
+                and weight.dtype == x.dtype):
             from vllm.kernels.triton.fused_gate_up_silu import triton_fused_gate_up_silu
             x = triton_fused_gate_up_silu(weight, x)
         else:

@@ -95,16 +95,16 @@ def _cuda_gemm_dispatch_impl(
     bias: torch.Tensor | None = None,
 ) -> torch.Tensor:
     if (bias is None
-            and x.dtype == torch.bfloat16
-            and weight.dtype == torch.bfloat16):
+            and x.dtype == weight.dtype
+            and x.dtype in (torch.bfloat16, torch.float16)):
         M, K = weight.shape
         B = x.shape[0]
         if B <= 32:
             # Shapes are enabled per-model at weight-load time, only after
-            # the runtime-tuned Triton kernel beat cuBLAS for that shape
-            # (see skinny_gemm.ensure_tuned).
+            # the runtime-tuned Triton kernel beat cuBLAS for that shape and
+            # dtype (see skinny_gemm.ensure_tuned).
             from vllm.kernels.triton.skinny_gemm import is_enabled, triton_skinny_gemm
-            if is_enabled(M, K):
+            if is_enabled(M, K, x.dtype):
                 return triton_skinny_gemm(weight, x)
     return torch.nn.functional.linear(x, weight, bias)
 
