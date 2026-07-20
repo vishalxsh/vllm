@@ -59,6 +59,65 @@ def _skinny_gemm_kernel(
     )
 
 
+@triton.jit
+def _skinny_gemm_splitk_kernel(
+    W_ptr, X_ptr, Yf_ptr,
+    M, K, B,
+    stride_wm, stride_wk,
+    stride_xb, stride_xk,
+    stride_ym, stride_yb,
+    BLOCK_M: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+    BLOCK_B: tl.constexpr,
+    SPLIT_K: tl.constexpr,
+):
+    """B=1 split-K variant: keeps tl.dot (tensor cores) but partitions the K
+    reduction across a 3rd grid axis so more programs run concurrently on the
+    reduction-bound square shapes. Each program accumulates its K-slice, then
+    atomic-adds into an fp32 output buffer — a SINGLE kernel (no separate
+    reduce launch, which is what made the pure-GEMV attempt slow). Yf is fp32
+    (bf16 atomics are emulated/expensive on Ampere); the caller casts to the
+    output dtype in a cheap elementwise op or the buffer is used directly.
+    """
+    pid_m = tl.program_id(0)
+    pid_b = tl.program_id(1)
+    pid_k = tl.program_id(2)
+
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_b = pid_b * BLOCK_B + tl.arange(0, BLOCK_B)
+
+    k_per_split = (K + SPLIT_K - 1) // SPLIT_K
+    k_start = pid_k * k_per_split
+    k_end = tl.minimum(k_start + k_per_split, K)
+
+    acc = tl.zeros((BLOCK_M, BLOCK_B), dtype=tl.float32)
+    for k in range(k_start, k_end, BLOCK_K):
+        offs_k = k + tl.arange(0, BLOCK_K)
+        w_mask = (offs_m[:, None] < M) & (offs_k[None, :] < k_end)
+        w_tile = tl.load(
+            W_ptr + offs_m[:, None] * stride_wm + offs_k[None, :] * stride_wk,
+            mask=w_mask, other=0.0,
+        )
+        x_mask = (offs_b[:, None] < B) & (offs_k[None, :] < k_end)
+        x_tile = tl.load(
+            X_ptr + offs_b[:, None] * stride_xb + offs_k[None, :] * stride_xk,
+            mask=x_mask, other=0.0,
+        )
+        acc = tl.dot(w_tile, tl.trans(x_tile), acc)
+
+    y_mask = (offs_m[:, None] < M) & (offs_b[None, :] < B)
+    if SPLIT_K == 1:
+        tl.store(
+            Yf_ptr + offs_m[:, None] * stride_ym + offs_b[None, :] * stride_yb,
+            acc, mask=y_mask,
+        )
+    else:
+        tl.atomic_add(
+            Yf_ptr + offs_m[:, None] * stride_ym + offs_b[None, :] * stride_yb,
+            acc, mask=y_mask,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Shape-keyed configs + runtime tuning.
 #
@@ -110,6 +169,15 @@ _CONFIGS = {
 }
 _DEFAULT_CONFIG = (32, 64, 16, 4, 3)
 
+# (M, K) -> SPLIT_K factor for the B=1 in-kernel split-K tl.dot path. Filled
+# empirically at load time by _tune_splitk_b1 (below), which races SPLIT_K
+# candidates INCLUDING 1 (== the plain V2 path) and keeps the fastest — so a
+# shape only gets split>1 if it is measurably faster, guaranteeing no
+# regression vs the widened-tuning V2 baseline. Default (absent key) is 1.
+_SPLITK_B1: dict = {}
+# Candidate split factors to race for B=1. 1 = no split (plain kernel).
+_SPLITK_CANDIDATES = (1, 2, 4, 8)
+
 # (M, K, dtype) triples the dispatch may route to Triton. Pre-seeded with
 # the Qwen2.5-7B bf16 shapes (validated vs cuBLAS offline: 1.04-1.22x per
 # shape). Other dtypes of the same shape must win their own race.
@@ -123,12 +191,38 @@ _ENABLED: set = {
 # lose) — prevents re-racing shapes that were judged not-faster-than-cuBLAS.
 _RACED: set = set()
 
+# (M, K, dtype) triples whose bucket=4 config was already re-tuned from the
+# wider B4 space this process — idempotency guard for the B=1 re-tune.
+_B4_RETUNED: set = set()
+
 # Pruned candidate space for runtime tuning, spanning the offline winners:
-# (BLOCK_M, BLOCK_K, num_warps, num_stages).
+# (BLOCK_M, BLOCK_K, num_warps, num_stages). Used for buckets 16 and 32 —
+# UNCHANGED from the offline-validated set, so those buckets never regress.
 _TUNE_SPACE = [
     (32, 64, 4, 4), (32, 64, 4, 3), (32, 128, 4, 3), (32, 128, 4, 4),
     (64, 64, 4, 3), (64, 128, 4, 3), (64, 128, 4, 2), (64, 128, 8, 3),
     (128, 128, 8, 3), (128, 128, 4, 2), (128, 64, 4, 3), (128, 128, 8, 2),
+]
+
+# Dedicated, wider candidate space for the bucket=4 (B<=4, incl. B=1) path.
+# At B=1 the GEMM is reduction/latency-bound with N pinned to 4, so the
+# winning knobs differ from large-B: smaller BLOCK_M gives more tiles to
+# fill the SMs on square shapes, larger BLOCK_K + deeper num_stages pipeline
+# the K-loop loads, and num_warps=2 trims per-program overhead. Each entry is
+# (BLOCK_M, BLOCK_K, BLOCK_B, num_warps, num_stages); BLOCK_B is also swept
+# (4/2/1) since a thinner N tile can reduce wasted tensor-core work.
+_TUNE_SPACE_B4 = [
+    # BLOCK_B = 4 (baseline granularity), varied M/K/warps/stages
+    (16, 128, 4, 2, 4), (16, 128, 4, 4, 4), (16, 256, 4, 4, 4),
+    (32, 128, 4, 4, 3), (32, 128, 4, 2, 4), (32, 256, 4, 4, 4),
+    (32, 256, 4, 4, 3), (64, 128, 4, 4, 3), (64, 128, 4, 4, 4),
+    (64, 256, 4, 4, 3), (64, 256, 4, 8, 3), (128, 128, 4, 4, 3),
+    (128, 256, 4, 8, 3),
+    # Thinner N tiles — less padded tensor-core work at B=1
+    (32, 128, 2, 4, 4), (32, 256, 2, 4, 4), (64, 256, 2, 4, 3),
+    (16, 256, 2, 4, 4),
+    # Deep-pipeline square-shape candidates (more stages, few warps)
+    (32, 64, 4, 2, 5), (32, 128, 4, 2, 5), (16, 128, 4, 2, 5),
 ]
 
 # Triton must beat cuBLAS by this factor at both buckets to be enabled.
@@ -166,11 +260,18 @@ def _tune(W: torch.Tensor, M: int, K: int, bucket: int):
     """Return (best_cfg, best_ms, cublas_ms) for this shape/bucket."""
     import triton.testing
 
+    # bucket=4 (the B=1 target) searches its own wider space; buckets 16/32
+    # keep the offline-validated 12-candidate set unchanged (no regression).
+    if bucket == 4:
+        candidates = [(bm, bk, bb, nw, ns)
+                      for (bm, bk, bb, nw, ns) in _TUNE_SPACE_B4]
+    else:
+        candidates = [(bm, bk, bucket, nw, ns) for (bm, bk, nw, ns) in _TUNE_SPACE]
+
     X = torch.randn(bucket, K, dtype=W.dtype, device=W.device)
     Y = torch.empty((bucket, M), dtype=W.dtype, device=W.device)
     best, best_t = None, float("inf")
-    for bm, bk, nw, ns in _TUNE_SPACE:
-        cfg = (bm, bk, bucket, nw, ns)
+    for cfg in candidates:
         try:
             t = triton.testing.do_bench(
                 lambda: _launch(W, X, Y, M, K, bucket, cfg),
@@ -190,6 +291,58 @@ def _tune(W: torch.Tensor, M: int, K: int, bucket: int):
     return best, best_t, t_cublas
 
 
+def _launch_splitk(W, X, Yf, M, K, B, cfg, split_k):
+    BLOCK_M, BLOCK_K, BLOCK_B, num_warps, num_stages = cfg
+    grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(B, BLOCK_B), split_k)
+    Yf.zero_()
+    _skinny_gemm_splitk_kernel[grid](
+        W, X, Yf,
+        M, K, B,
+        W.stride(0), W.stride(1),
+        X.stride(0), X.stride(1),
+        1, M,
+        BLOCK_M=BLOCK_M, BLOCK_K=BLOCK_K, BLOCK_B=BLOCK_B,
+        SPLIT_K=split_k,
+        num_warps=num_warps, num_stages=num_stages,
+    )
+
+
+def _tune_splitk_b1(W: torch.Tensor, M: int, K: int, cfg4) -> None:
+    """Race B=1 SPLIT_K candidates (incl. 1) with the winning bucket=4 config.
+
+    Only adopt split>1 if strictly faster than split=1, so this can never
+    regress the V2 (widened-tuning) baseline. Populates _SPLITK_B1[(M,K)].
+    """
+    import triton.testing
+
+    X  = torch.randn(1, K, dtype=W.dtype, device=W.device)
+    Yf = torch.zeros(1, M, dtype=torch.float32, device=W.device)
+
+    def _time(s):
+        try:
+            return triton.testing.do_bench(
+                lambda: _launch_splitk(W, X, Yf, M, K, 1, cfg4, s),
+                warmup=10, rep=50, return_mode="median",
+            )
+        except Exception:
+            return float("inf")
+
+    # Baseline: split=1 (the plain V2 path, just via the split-K kernel).
+    base_t = _time(1)
+    best_split, best_t = 1, base_t
+    for s in _SPLITK_CANDIDATES:
+        if s == 1 or K // s < 128:
+            continue  # too little K per split to be worthwhile
+        t = _time(s)
+        # Adopt split>1 only if strictly faster than split=1 by a margin,
+        # so this can never regress the V2 baseline.
+        if t < best_t and t < base_t * 0.98:
+            best_split, best_t = s, t
+    _SPLITK_B1[(M, K)] = best_split
+    print(f"[skinny_gemm] B=1 split-K (M={M}, K={K}) -> SPLIT_K={best_split} "
+          f"(base={base_t*1e3:.0f}us best={best_t*1e3:.0f}us)")
+
+
 def ensure_tuned(W: torch.Tensor) -> None:
     """Tune W's shape and enable Triton dispatch for it iff it beats cuBLAS.
 
@@ -204,6 +357,22 @@ def ensure_tuned(W: torch.Tensor) -> None:
         return
     M, K = W.shape
     key = (M, K, W.dtype)
+
+    # Always (idempotently) re-tune the bucket=4 (B=1) config from the wider
+    # B4 space, even for pre-seeded/enabled shapes — the offline seeds were
+    # picked from the narrow shared space and don't reflect the B=1 optimum.
+    # buckets 16/32 are left exactly as seeded. Scoped to bucket=4 only, so
+    # no other batch size can regress.
+    if key not in _B4_RETUNED:
+        _B4_RETUNED.add(key)
+        cfg4, t4, _ = _tune(W, M, K, 4)
+        _CONFIGS[(M, K, 4)] = cfg4
+        print(f"[skinny_gemm] bucket4 re-tuned (M={M}, K={K}, {W.dtype}) "
+              f"-> {cfg4} triton={t4*1e3:.0f}us")
+        # Race the B=1 split-K variants (incl. SPLIT_K=1) with the winning
+        # bucket=4 config; only adopt split>1 if it is strictly faster.
+        _tune_splitk_b1(W, M, K, cfg4)
+
     if key in _ENABLED or key in _RACED:
         return  # already raced this dtype (pre-seeded, won, or lost)
     _RACED.add(key)
@@ -241,6 +410,26 @@ def triton_skinny_gemm(W: torch.Tensor, X: torch.Tensor) -> torch.Tensor:
     B    = X.shape[0]
 
     BLOCK_M, BLOCK_K, BLOCK_B, num_warps, num_stages = _pick_config(M, K, B)
+
+    # B=1: use the in-kernel split-K tl.dot variant if a split>1 was chosen
+    # for this shape. Keeps tensor cores; a single kernel atomic-adds the
+    # per-split partials into an fp32 buffer (no separate reduce launch).
+    if B == 1:
+        split_k = _SPLITK_B1.get((M, K), 1)
+        if split_k > 1:
+            Yf   = torch.zeros((B, M), dtype=torch.float32, device=W.device)
+            grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(B, BLOCK_B), split_k)
+            _skinny_gemm_splitk_kernel[grid](
+                W, X, Yf,
+                M, K, B,
+                W.stride(0), W.stride(1),
+                X.stride(0), X.stride(1),
+                1, M,
+                BLOCK_M=BLOCK_M, BLOCK_K=BLOCK_K, BLOCK_B=BLOCK_B,
+                SPLIT_K=split_k,
+                num_warps=num_warps, num_stages=num_stages,
+            )
+            return Yf.to(X.dtype)
 
     # Allocate Y directly in [B, M] layout; kernel writes Y[m,b] via
     # (stride_ym=1, stride_yb=M) so no .t().contiguous() copy is needed.
