@@ -17,6 +17,7 @@ Usage:
   .venv/bin/python kernel_opt/benchmarks/bench_vs_torch_compile_b1.py "$ORIG"
 """
 
+import importlib.util
 import json
 import math
 import os
@@ -27,11 +28,29 @@ import torch
 import torch.nn.functional as F
 import triton.testing
 
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
-from vllm.kernels.triton.skinny_gemm import ensure_tuned as sg_ensure_tuned
-from vllm.kernels.triton.skinny_gemm import triton_skinny_gemm
-from vllm.kernels.triton.fused_gate_up_silu import ensure_tuned as fu_ensure_tuned
-from vllm.kernels.triton.fused_gate_up_silu import triton_fused_gate_up_silu
+REPO = pathlib.Path(__file__).parent.parent.parent
+
+
+def _load(name, relpath):
+    # Direct file load, NOT `from vllm.kernels... import ...` — a dotted
+    # import forces Python to run vllm/kernels/__init__.py first, which
+    # eagerly imports aiter_ops -> vllm.platforms -> vllm._C. The Artemis
+    # runner's precompiled build doesn't currently ship vllm._C (separate,
+    # already-diagnosed toolkit gap), and this benchmark's own code never
+    # touches vllm._C — so there's no reason to trigger that chain at all.
+    spec = importlib.util.spec_from_file_location(name, REPO / relpath)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+skinny = _load("skinny_gemm", "vllm/kernels/triton/skinny_gemm.py")
+fused = _load("fused_gate_up_silu", "vllm/kernels/triton/fused_gate_up_silu.py")
+sg_ensure_tuned = skinny.ensure_tuned
+triton_skinny_gemm = skinny.triton_skinny_gemm
+fu_ensure_tuned = fused.ensure_tuned
+triton_fused_gate_up_silu = fused.triton_fused_gate_up_silu
 
 DEVICE = f"cuda:{os.environ.get('CUDA_DEVICE', '0')}"
 torch.cuda.set_device(DEVICE)

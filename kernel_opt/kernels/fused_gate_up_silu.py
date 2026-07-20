@@ -271,7 +271,9 @@ if __name__ == "__main__":
     print("Overall:", "PASSED" if all_passed else "FAILED")
 
     print("\n=== Speed: fused vs unfused (us) ===")
-    from vllm.kernels.triton.skinny_gemm import triton_skinny_gemm
+    from skinny_gemm import triton_skinny_gemm  # sibling file, not the vllm package —
+    # avoids vllm/kernels/__init__.py's eager import chain (aiter_ops -> vllm.platforms
+    # -> vllm._C), which the Artemis runner's precompiled build doesn't currently ship
 
     for B in batch_sizes:
         W = torch.randn(2 * M_half, K, dtype=torch.bfloat16, device="cuda")
